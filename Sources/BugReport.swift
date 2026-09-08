@@ -45,7 +45,10 @@ enum BugReporter {
     /// because it is our view hierarchy, not the screen.
     @MainActor
     static func capture() -> Data? {
-        guard let window = NSApp.keyWindow ?? NSApp.mainWindow, let view = window.contentView else { return nil }
+        // The content view's superview is the window's frame view: the whole
+        // window, title bar included, without needing screen-recording rights.
+        guard let window = NSApp.keyWindow ?? NSApp.mainWindow,
+              let view = window.contentView?.superview ?? window.contentView else { return nil }
         let bounds = view.bounds
         guard let rep = view.bitmapImageRepForCachingDisplay(in: bounds) else { return nil }
         view.cacheDisplay(in: bounds, to: rep)

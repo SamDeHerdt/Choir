@@ -9,6 +9,7 @@ struct HomeView: View {
     @EnvironmentObject var usage: UsageMonitor
     @Binding var route: Route?
     @Binding var showTour: Bool
+    @Binding var setupShown: Bool
     @State private var refreshing = false
     @State private var found: Int?
 
@@ -25,12 +26,17 @@ struct HomeView: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
 
+                if setupShown {
+                    SetupView(isShown: $setupShown)
+                        .transition(.opacity.combined(with: .offset(y: -6)))
+                }
+
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 10)], spacing: 10) {
                     quick("New chat", "square.and.pencil") { route = .conversation(store.newConversation().id) }
                     quick("New room", "person.3.fill") { route = .conversation(store.newConversation(room: true).id) }
                     quick("New project", "folder.badge.plus") { route = .project(store.newProject().id) }
                     if !(claudeOK && codexOK) {
-                        quick("Set up connections", "link") { NotificationCenter.default.post(name: .choirShowSetup, object: nil) }
+                        quick("Set up connections", "link") { withAnimation(Motion.on(Motion.smoothOut(Motion.fast))) { setupShown = true } }
                     }
                     quick("Show me around", "sparkles") { showTour = true }
                 }

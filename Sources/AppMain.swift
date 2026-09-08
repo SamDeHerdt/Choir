@@ -75,51 +75,72 @@ struct RootView: View {
     @EnvironmentObject var usage: UsageMonitor
     @State private var route: Route?
     @State private var columns: NavigationSplitViewVisibility = .all
-    @State private var showTour = false
-    @State private var showSwitcher = false
-    @State private var bugReport: BugReporter.Report?
-    @State private var showSetup = false
+    /// Exactly one sheet modifier: several `.sheet`s on one view dismiss each
+    /// other on macOS whenever the view re-evaluates (model discovery
+    /// finishing was enough to close the setup guide after five seconds).
+    enum Presentation: Identifiable {
+        case tour, switcher, bug(BugReporter.Report)
+        var id: String {
+            switch self {
+            case .tour: return "tour"
+            case .switcher: return "switcher"
+            case .bug(let r): return "bug-\(r.id)"
+            }
+        }
+    }
+    @State private var presented: Presentation?
+    /// The connection guide, shown as a card on Home (never a sheet — see SetupView).
+    @State private var setupShown = false
+    private var showTour: Binding<Bool> {
+        Binding(get: { if case .tour = presented { return true } else { return false } },
+                set: { presented = $0 ? .tour : nil })
+    }
 
     var body: some View {
         NavigationSplitView(columnVisibility: $columns) {
-            Sidebar(route: $route, showTour: $showTour)
+            Sidebar(route: $route, showTour: showTour)
                 .navigationSplitViewColumnWidth(min: 220, ideal: 260, max: 340)
+                .toolbar { ToolbarItem(placement: .navigation) { reportButton } }
         } detail: {
             detail
         }
         .overlay(alignment: .top) { banner }
-        .overlay(alignment: .topTrailing) { reportButton }
         .onAppear {
             restoreRoute()
             // Populate the picker with whatever the signed-in tools can reach.
             Task { _ = await ModelDiscovery.refresh(store: store) }
         }
-        .sheet(isPresented: $showTour) { TourView().environmentObject(store) }
-        .sheet(isPresented: $showSwitcher) { QuickSwitcher(route: $route).environmentObject(store) }
-        .sheet(item: $bugReport) { report in BugReportSheet(report: report).environmentObject(store) }
-        .sheet(isPresented: $showSetup, onDismiss: {
-            // After the very first setup, the short tour.
-            if store.settings.tourSeen != true { showTour = true; store.settings.tourSeen = true; store.scheduleSave() }
-        }) { SetupView().environmentObject(store) }
-        .onReceive(NotificationCenter.default.publisher(for: .choirShowSetup)) { _ in showSetup = true }
+        .sheet(item: $presented) { item in
+            Group {
+                switch item {
+                case .tour: TourView()
+                case .switcher: QuickSwitcher(route: $route)
+                case .bug(let report): BugReportSheet(report: report)
+                }
+            }
+            .environmentObject(store)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .choirShowSetup)) { _ in
+            withAnimation(Motion.on(Motion.smoothOut(Motion.fast))) { route = nil; setupShown = true }
+        }
         .task {
             // First launch with nothing connected: open the guide by itself.
             let forced = CommandLine.arguments.contains("--setup")
             guard forced || (store.settings.setupSeen != true && (store.enabledModels.isEmpty || !(CLI.isInstalled("claude") || CLI.isInstalled("codex")))) else { return }
-            try? await Task.sleep(nanoseconds: 600_000_000)
-            showSetup = true
+            route = nil
+            setupShown = true
         }
         .onReceive(NotificationCenter.default.publisher(for: .choirReportProblem)) { note in
             // Capture first, while the window is still what the user sees.
             let shot = BugReporter.capture()
-            bugReport = BugReporter.Report(
+            presented = .bug(BugReporter.Report(
                 title: (note.object as? String) ?? "",
                 whatHappened: "", expected: "",
                 screenshot: shot,
-                diagnostics: BugReporter.diagnostics(store: store, conductor: conductor, usage: usage))
+                diagnostics: BugReporter.diagnostics(store: store, conductor: conductor, usage: usage)))
         }
-        .onReceive(NotificationCenter.default.publisher(for: .choirQuickSwitch)) { _ in showSwitcher = true }
-        .onReceive(NotificationCenter.default.publisher(for: .choirShowTour)) { _ in showTour = true }
+        .onReceive(NotificationCenter.default.publisher(for: .choirQuickSwitch)) { _ in presented = .switcher }
+        .onReceive(NotificationCenter.default.publisher(for: .choirShowTour)) { _ in presented = .tour }
         .onReceive(NotificationCenter.default.publisher(for: .choirGoHome)) { _ in
             withAnimation(Motion.on(Motion.smoothOut(Motion.fast))) { route = nil }
         }
@@ -163,7 +184,7 @@ struct RootView: View {
             LibraryView(kind: kind)
                 .id(kind)
         case .none:
-            HomeView(route: $route, showTour: $showTour)
+            HomeView(route: $route, showTour: showTour, setupShown: $setupShown)
         }
     }
 
@@ -171,20 +192,22 @@ struct RootView: View {
     /// it is right now and opens the report. Wherever the problem is, it is
     /// one click away and the screenshot shows the problem, not a menu.
     private var reportButton: some View {
-        Button {
-            NotificationCenter.default.post(name: .choirReportProblem, object: nil)
+        Menu {
+            Button {
+                NotificationCenter.default.post(name: .choirReportProblem, object: nil)
+            } label: { Label("Report a problem…", systemImage: "ladybug") }
+            Button {
+                NotificationCenter.default.post(name: .choirShowSetup, object: nil)
+            } label: { Label("Set up connections…", systemImage: "link") }
+            Divider()
+            Button {
+                NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+            } label: { Label("Settings…", systemImage: "gearshape") }
         } label: {
-            Image(systemName: "ladybug")
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(.secondary)
-                .frame(width: 26, height: 26)
-                .contentShape(Circle())
+            Image(systemName: "ladybug").font(.system(size: 13, weight: .semibold))
         }
-        .buttonStyle(.plain)
-        .glassPanel(13, interactive: true)
-        .help("Report a problem — takes a screenshot of this window (⌘⇧B)")
-        .padding(.top, 8)
-        .padding(.trailing, 10)
+        .menuIndicator(.hidden)
+        .help("Report a problem (⌘⇧B) · set up connections · settings")
     }
 
     @ViewBuilder

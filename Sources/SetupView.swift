@@ -7,7 +7,8 @@ import AppKit
 /// the first time nothing is connected; always under Help › Set Up Connections.
 struct SetupView: View {
     @EnvironmentObject var store: Store
-    @Environment(\.dismiss) private var dismiss
+    /// Shown inline on Home; Done / Skip hides it.
+    @Binding var isShown: Bool
     @State private var claude: Status = .checking
     @State private var codex: Status = .checking
     @State private var ollama: Status = .checking
@@ -49,14 +50,15 @@ struct SetupView: View {
                 Button(readyCount > 0 ? "Done" : "Skip for now") {
                     store.settings.setupSeen = true
                     store.scheduleSave()
-                    dismiss()
+                    withAnimation(Motion.on(Motion.smoothOut(Motion.medium))) { isShown = false }
                     if readyCount > 0 { Task { _ = await ModelDiscovery.refresh(store: store) } }
                 }
-                .prominentGlassButton().keyboardShortcut(.defaultAction)
+                .prominentGlassButton()
             }
         }
         .padding(20)
-        .frame(width: 600)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .glassPanel(18)
         .onAppear { check() }
     }
 
@@ -163,11 +165,12 @@ struct SetupView: View {
                 x = authFiles.contains { FileManager.default.fileExists(atPath: $0) } ? .ready : .installedNotSignedIn
             } else { x = .missing }
 
-            var o: Status = .missing
-            if let url = URL(string: "\(ollamaHost)/api/tags"), let (data, _) = try? await URLSession.shared.data(from: url),
-               let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any], let models = obj["models"] as? [[String: Any]] {
-                o = models.isEmpty ? .installedNotSignedIn : .ready
-            }
+            let o: Status = await {
+                guard let url = URL(string: "\(ollamaHost)/api/tags"), let (data, _) = try? await URLSession.shared.data(from: url),
+                      let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                      let models = obj["models"] as? [[String: Any]] else { return .missing }
+                return models.isEmpty ? .installedNotSignedIn : .ready
+            }()
             await MainActor.run { claude = c; codex = x; ollama = o; checking = false }
         }
     }
