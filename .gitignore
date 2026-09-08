@@ -1,0 +1,4 @@
+# Build output — build.sh recreates it and installs to /Applications
+Choir.app/
+dist/
+.DS_Store
