@@ -46,6 +46,7 @@ struct ChoirApp: App {
                     .keyboardShortcut("k", modifiers: .command)
             }
             CommandGroup(after: .help) {
+                Button("Set Up Connections…") { NotificationCenter.default.post(name: .choirShowSetup, object: nil) }
                 Button("Report a Problem…") { NotificationCenter.default.post(name: .choirReportProblem, object: nil) }
                     .keyboardShortcut("b", modifiers: [.command, .shift])
             }
@@ -77,6 +78,7 @@ struct RootView: View {
     @State private var showTour = false
     @State private var showSwitcher = false
     @State private var bugReport: BugReporter.Report?
+    @State private var showSetup = false
 
     var body: some View {
         NavigationSplitView(columnVisibility: $columns) {
@@ -86,6 +88,7 @@ struct RootView: View {
             detail
         }
         .overlay(alignment: .top) { banner }
+        .overlay(alignment: .topTrailing) { reportButton }
         .onAppear {
             restoreRoute()
             // Populate the picker with whatever the signed-in tools can reach.
@@ -94,6 +97,18 @@ struct RootView: View {
         .sheet(isPresented: $showTour) { TourView().environmentObject(store) }
         .sheet(isPresented: $showSwitcher) { QuickSwitcher(route: $route).environmentObject(store) }
         .sheet(item: $bugReport) { report in BugReportSheet(report: report).environmentObject(store) }
+        .sheet(isPresented: $showSetup, onDismiss: {
+            // After the very first setup, the short tour.
+            if store.settings.tourSeen != true { showTour = true; store.settings.tourSeen = true; store.scheduleSave() }
+        }) { SetupView().environmentObject(store) }
+        .onReceive(NotificationCenter.default.publisher(for: .choirShowSetup)) { _ in showSetup = true }
+        .task {
+            // First launch with nothing connected: open the guide by itself.
+            let forced = CommandLine.arguments.contains("--setup")
+            guard forced || (store.settings.setupSeen != true && (store.enabledModels.isEmpty || !(CLI.isInstalled("claude") || CLI.isInstalled("codex")))) else { return }
+            try? await Task.sleep(nanoseconds: 600_000_000)
+            showSetup = true
+        }
         .onReceive(NotificationCenter.default.publisher(for: .choirReportProblem)) { note in
             // Capture first, while the window is still what the user sees.
             let shot = BugReporter.capture()
@@ -150,6 +165,26 @@ struct RootView: View {
         case .none:
             HomeView(route: $route, showTour: $showTour)
         }
+    }
+
+    /// Always in the corner, on every screen: one click captures the window as
+    /// it is right now and opens the report. Wherever the problem is, it is
+    /// one click away and the screenshot shows the problem, not a menu.
+    private var reportButton: some View {
+        Button {
+            NotificationCenter.default.post(name: .choirReportProblem, object: nil)
+        } label: {
+            Image(systemName: "ladybug")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .frame(width: 26, height: 26)
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .glassPanel(13, interactive: true)
+        .help("Report a problem — takes a screenshot of this window (⌘⇧B)")
+        .padding(.top, 8)
+        .padding(.trailing, 10)
     }
 
     @ViewBuilder
@@ -230,4 +265,5 @@ extension Notification.Name {
     static let choirPickModel = Notification.Name("choirPickModel")
     static let choirQuickSwitch = Notification.Name("choirQuickSwitch")
     static let choirReportProblem = Notification.Name("choirReportProblem")
+    static let choirShowSetup = Notification.Name("choirShowSetup")
 }

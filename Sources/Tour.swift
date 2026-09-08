@@ -29,6 +29,9 @@ struct HomeView: View {
                     quick("New chat", "square.and.pencil") { route = .conversation(store.newConversation().id) }
                     quick("New room", "person.3.fill") { route = .conversation(store.newConversation(room: true).id) }
                     quick("New project", "folder.badge.plus") { route = .project(store.newProject().id) }
+                    if !(claudeOK && codexOK) {
+                        quick("Set up connections", "link") { NotificationCenter.default.post(name: .choirShowSetup, object: nil) }
+                    }
                     quick("Show me around", "sparkles") { showTour = true }
                 }
 

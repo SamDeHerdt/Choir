@@ -230,7 +230,8 @@ struct ThreadHeader: View {
             }
         }
         .motion(Motion.smoothOut(Motion.fast), value: conductor.isRunning(conversation.id))
-        .padding(.horizontal, 18)
+        .padding(.leading, 18)
+        .padding(.trailing, 48)
         .padding(.vertical, 10)
     }
 

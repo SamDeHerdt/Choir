@@ -321,6 +321,9 @@ struct AppSettings: Codable {
     var lastRoute: String = ""
     /// Where "Report a problem" files issues. Nil = Choir's own repo.
     var bugRepo: String?
+    /// The first-run connection guide has been shown (or skipped).
+    var setupSeen: Bool?
+    var tourSeen: Bool?
     /// First launch shows the tour once. Optional so older settings decode.
     var hasSeenTour: Bool?
 
