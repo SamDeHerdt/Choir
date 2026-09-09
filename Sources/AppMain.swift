@@ -100,22 +100,14 @@ struct RootView: View {
         NavigationSplitView(columnVisibility: $columns) {
             Sidebar(route: $route, showTour: showTour)
                 .navigationSplitViewColumnWidth(min: 220, ideal: 260, max: 340)
-                .toolbar(removing: .sidebarToggle)
-                .toolbar {
-                    ToolbarItemGroup(placement: .primaryAction) {
-                        reportButton
-                        Button {
-                            withAnimation(Motion.on(Motion.smoothOut(Motion.fast))) {
-                                columns = columns == .detailOnly ? .all : .detailOnly
-                            }
-                        } label: { Image(systemName: "sidebar.left") }
-                        .help("Hide or show the sidebar")
-                    }
-                }
+
         } detail: {
             detail
         }
         .overlay(alignment: .top) { banner }
+        // The system sidebar toggle stays (it follows the sidebar when it
+        // collapses); the ladybug lives in the always-visible detail toolbar.
+        .toolbar { ToolbarItem(placement: .navigation) { reportButton } }
         .onAppear {
             restoreRoute()
             // Populate the picker with whatever the signed-in tools can reach.
