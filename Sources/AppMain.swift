@@ -100,7 +100,18 @@ struct RootView: View {
         NavigationSplitView(columnVisibility: $columns) {
             Sidebar(route: $route, showTour: showTour)
                 .navigationSplitViewColumnWidth(min: 220, ideal: 260, max: 340)
-                .toolbar { ToolbarItem(placement: .navigation) { reportButton } }
+                .toolbar(removing: .sidebarToggle)
+                .toolbar {
+                    ToolbarItemGroup(placement: .primaryAction) {
+                        reportButton
+                        Button {
+                            withAnimation(Motion.on(Motion.smoothOut(Motion.fast))) {
+                                columns = columns == .detailOnly ? .all : .detailOnly
+                            }
+                        } label: { Image(systemName: "sidebar.left") }
+                        .help("Hide or show the sidebar")
+                    }
+                }
         } detail: {
             detail
         }
@@ -127,8 +138,8 @@ struct RootView: View {
             // First launch with nothing connected: open the guide by itself.
             let forced = CommandLine.arguments.contains("--setup")
             guard forced || (store.settings.setupSeen != true && (store.enabledModels.isEmpty || !(CLI.isInstalled("claude") || CLI.isInstalled("codex")))) else { return }
-            route = nil
-            setupShown = true
+            try? await Task.sleep(nanoseconds: 300_000_000)
+            withAnimation(Motion.on(Motion.smoothOut(Motion.fast))) { route = nil; setupShown = true }
         }
         .onReceive(NotificationCenter.default.publisher(for: .choirReportProblem)) { note in
             // Capture first, while the window is still what the user sees.
