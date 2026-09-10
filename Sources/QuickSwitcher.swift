@@ -26,10 +26,20 @@ struct QuickSwitcher: View {
         func match(_ s: String) -> Bool { q.isEmpty || s.localizedCaseInsensitiveContains(q) }
         var out: [Hit] = []
 
-        for c in store.conversations where match(c.title) || (!q.isEmpty && c.messages.contains { $0.text.localizedCaseInsensitiveContains(q) }) {
+        for c in store.conversations where match(c.title) || (!q.isEmpty && c.firstHit(for: q) != nil) {
+            // A body match shows the line it found and, on return, takes you
+            // to that message instead of the top of the thread.
+            let hit = q.isEmpty ? nil : c.firstHit(for: q)
             out.append(Hit(id: "c-\(c.id)", symbol: c.isRoom ? "person.3.fill" : "bubble.left",
-                           title: c.title, subtitle: c.isRoom ? "Room" : store.label(forKey: c.modelKey),
-                           color: store.color(of: c)) { route = .conversation(c.id) })
+                           title: c.title,
+                           subtitle: hit?.snippet ?? (c.isRoom ? "Room" : store.label(forKey: c.modelKey)),
+                           color: store.color(of: c)) {
+                if let hit {
+                    store.searchTerm = q
+                    store.jump = SearchJump(conversationID: c.id, messageID: hit.messageID, term: q)
+                }
+                route = .conversation(c.id)
+            })
             if out.count >= 8 { break }
         }
         for p in store.projects where match(p.name) {

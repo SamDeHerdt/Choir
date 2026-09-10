@@ -51,6 +51,12 @@ final class Store: ObservableObject {
     @Published var selection: UUID?
     /// Non-fatal problems surfaced in the UI rather than swallowed.
     @Published var banner: String?
+    /// The search hit being opened: the thread scrolls to that message and
+    /// lights it, instead of dropping the reader at the top of the history.
+    @Published var jump: SearchJump?
+    /// What is in the search box. Kept here so the open thread can paint the
+    /// phrase wherever it appears, for as long as the search is running.
+    @Published var searchTerm: String = ""
 
     private let dir: URL
     private var saveWork: Task<Void, Never>?

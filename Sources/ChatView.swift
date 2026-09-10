@@ -35,7 +35,15 @@ struct ChatView: View {
     @State private var draft = ""
     @State private var showLibrarySheet = false
     @State private var atBottom = true
+    /// The message a search took us to, while its ring is still showing.
+    @State private var flashID: UUID?
     @FocusState private var composerFocused: Bool
+
+    /// The jump waiting for this thread, if the reader opened it from a search.
+    private var pendingJump: SearchJump? {
+        guard let jump = store.jump, jump.conversationID == conversationID else { return nil }
+        return jump
+    }
 
     /// Changes as any streaming answer grows — not only the last message,
     /// because in a room three of them grow at once.
@@ -66,6 +74,14 @@ struct ChatView: View {
                     .environmentObject(store)
             }
             .onAppear { composerFocused = true }
+            // Typing in the search box moves the thread that is already open —
+            // otherwise search only worked on chats you were not already in.
+            .onChange(of: store.searchTerm) { _, raw in
+                let term = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard term.count >= 2 else { store.jump = nil; return }
+                guard let hit = conversation.firstHit(for: term) else { return }
+                store.jump = SearchJump(conversationID: conversationID, messageID: hit.messageID, term: term)
+            }
         } else {
             EmptyThreadState()
         }
@@ -96,6 +112,29 @@ struct ChatView: View {
                 .padding(.vertical, 24)
                 .frame(maxWidth: conversation.isRoom ? 1100 : 980, alignment: .leading)
                 .frame(maxWidth: .infinity)
+                .environment(\.searchHitID, flashID)
+                .searchHighlighted(store.searchTerm)
+            }
+            // Opened from a search: go to the message that matched, and say so
+            // with a ring that fades out on its own.
+            .task(id: pendingJump?.token) {
+                guard let jump = pendingJump else {
+                    flashID = nil
+                    return
+                }
+                let anchor = MessageAnchor(id: jump.messageID)
+                var tx = Transaction(); tx.disablesAnimations = true
+                // The list is lazy: the first scroll realises the row, the
+                // later ones settle it once its real height is known.
+                for delay in [UInt64(0), 80_000_000, 260_000_000] {
+                    if delay > 0 {
+                        do { try await Task.sleep(nanoseconds: delay) } catch { return }
+                    }
+                    withTransaction(tx) { proxy.scrollTo(anchor, anchor: .center) }
+                }
+                withAnimation(Motion.on(Motion.smoothOut(Motion.fast))) { flashID = jump.messageID }
+                do { try await Task.sleep(nanoseconds: 2_600_000_000) } catch { return }
+                withAnimation(Motion.on(Motion.smoothOut(Motion.slow))) { flashID = nil }
             }
             // Streaming: follow only if the reader is already at the bottom, and
             // without animation — an animated scroll on every token is the
@@ -134,6 +173,59 @@ struct BackdropWash: View {
 
 // MARK: - Header
 
+/// While a search is running, the open thread says how many places mention the
+/// phrase and steps between them — the part a sidebar list cannot do once you
+/// are already inside the chat.
+struct MatchNavigator: View {
+    @EnvironmentObject var store: Store
+    let conversation: Conversation
+
+    private var hits: [SearchHit] { conversation.hits(for: store.searchTerm) }
+
+    private func position(_ hits: [SearchHit]) -> Int {
+        guard let current = store.jump?.messageID,
+              let index = hits.firstIndex(where: { $0.messageID == current }) else { return 0 }
+        return index
+    }
+
+    var body: some View {
+        let hits = hits
+        if store.searchTerm.trimmingCharacters(in: .whitespacesAndNewlines).count >= 2, !hits.isEmpty {
+            let at = position(hits)
+            HStack(spacing: 3) {
+                Button { step(-1, hits) } label: {
+                    Image(systemName: "chevron.up").font(.system(size: 9, weight: .bold))
+                }
+                .buttonStyle(.plain).foregroundStyle(.secondary)
+                .help("Previous mention")
+
+                Text("\(at + 1) of \(hits.count)")
+                    .font(.system(size: 10.5, weight: .medium))
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
+
+                Button { step(1, hits) } label: {
+                    Image(systemName: "chevron.down").font(.system(size: 9, weight: .bold))
+                }
+                .buttonStyle(.plain).foregroundStyle(.secondary)
+                .help("Next mention")
+            }
+            .padding(.horizontal, 8).padding(.vertical, 4)
+            .glassPanel(8)
+            .help("Mentions of “\(store.searchTerm)” in this chat")
+            .transition(.opacity)
+        }
+    }
+
+    private func step(_ delta: Int, _ hits: [SearchHit]) {
+        guard !hits.isEmpty else { return }
+        let next = (position(hits) + delta + hits.count) % hits.count
+        store.jump = SearchJump(conversationID: conversation.id,
+                                messageID: hits[next].messageID,
+                                term: store.searchTerm)
+    }
+}
+
 struct ThreadHeader: View {
     @EnvironmentObject var store: Store
     @EnvironmentObject var conductor: Conductor
@@ -168,6 +260,8 @@ struct ThreadHeader: View {
             }
 
             Spacer()
+
+            MatchNavigator(conversation: conversation)
 
             ColorSwatch(color: store.color(of: conversation), isCustom: conversation.colorHex != nil) { hex in
                 guard let i = store.index(of: conversation.id) else { return }
@@ -270,12 +364,16 @@ struct RoundView: View {
         VStack(alignment: .leading, spacing: 16) {
             if let prompt = round.prompt {
                 UserBubble(message: prompt, conversationID: conversation.id)
+                    .searchFlash(prompt.id)
+                    .id(MessageAnchor(id: prompt.id))
             }
             if conversation.isRoom && round.answers.count > 1 {
                 RoomStage(round: round, conversation: conversation)
             } else {
                 ForEach(round.answers) { answer in
                     AssistantBlock(message: answer)
+                        .searchFlash(answer.id)
+                        .id(MessageAnchor(id: answer.id))
                         .transition(.asymmetric(
                             insertion: .opacity.combined(with: .offset(y: 8)),
                             removal: .opacity))
@@ -294,6 +392,7 @@ struct UserBubble: View {
     @State private var confirmingDelete = false
     @State private var editing = false
     @State private var editText = ""
+    @Environment(\.searchTerm) private var searchTerm
     @FocusState private var editFocused: Bool
 
     var body: some View {
@@ -303,7 +402,7 @@ struct UserBubble: View {
                 if editing {
                     editor
                 } else {
-                Text(message.text)
+                Text(AttributedString(message.text).highlightingSearch(searchTerm))
                     .font(.system(size: 13.5))
                     .textSelection(.enabled)
                     .fixedSize(horizontal: false, vertical: true)
@@ -703,6 +802,8 @@ struct RoomStage: View {
                         participant(answer, compact: true)
                             .frame(maxWidth: .infinity, alignment: .topLeading)
                             .matchedGeometryEffect(id: answer.id, in: slots)
+                            .searchFlash(answer.id)
+                            .id(MessageAnchor(id: answer.id))
                     }
                 }
                 .onAppear { if anyStreaming { sawStreaming = true } }
@@ -714,6 +815,8 @@ struct RoomStage: View {
                     ForEach(voices) { answer in
                         participant(answer, compact: false)
                             .matchedGeometryEffect(id: answer.id, in: slots)
+                            .searchFlash(answer.id)
+                            .id(MessageAnchor(id: answer.id))
                     }
                 }
             }

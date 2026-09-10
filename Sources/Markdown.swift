@@ -164,17 +164,23 @@ enum MD {
 
 struct MarkdownText: View {
     let source: String
+    /// Whatever is in the search box — painted wherever it appears.
+    @Environment(\.searchTerm) private var searchTerm
+
+    private func painted(_ markdown: String) -> Text {
+        Text(MD.inline(markdown).highlightingSearch(searchTerm))
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             ForEach(MD.parse(source)) { block in
                 switch block {
                 case .heading(let level, let text):
-                    Text(MD.inline(text))
+                    painted(text)
                         .font(.system(size: level <= 1 ? 19 : level == 2 ? 16 : 14, weight: .semibold))
                         .padding(.top, 2)
                 case .paragraph(let text):
-                    Text(MD.inline(text))
+                    painted(text)
                         .textSelection(.enabled)
                         .fixedSize(horizontal: false, vertical: true)
                 case .bullet(let items):
@@ -182,7 +188,7 @@ struct MarkdownText: View {
                         ForEach(Array(items.enumerated()), id: \.offset) { _, item in
                             HStack(alignment: .firstTextBaseline, spacing: 8) {
                                 Text("•").foregroundStyle(.secondary)
-                                Text(MD.inline(item)).fixedSize(horizontal: false, vertical: true)
+                                painted(item).fixedSize(horizontal: false, vertical: true)
                             }
                         }
                     }
@@ -191,14 +197,14 @@ struct MarkdownText: View {
                         ForEach(Array(items.enumerated()), id: \.offset) { index, item in
                             HStack(alignment: .firstTextBaseline, spacing: 8) {
                                 Text("\(index + 1).").foregroundStyle(.secondary).monospacedDigit()
-                                Text(MD.inline(item)).fixedSize(horizontal: false, vertical: true)
+                                painted(item).fixedSize(horizontal: false, vertical: true)
                             }
                         }
                     }
                 case .quote(let text):
                     HStack(alignment: .top, spacing: 10) {
                         Rectangle().frame(width: 2).foregroundStyle(.secondary.opacity(0.4))
-                        Text(MD.inline(text)).foregroundStyle(.secondary)
+                        painted(text).foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 case .code(let language, let body):

@@ -14,7 +14,9 @@ struct Sidebar: View {
     @EnvironmentObject var conductor: Conductor
     @Binding var route: Route?
     @Binding var showTour: Bool
-    @State private var search = ""
+    /// The phrase lives on the store, not here: the open thread paints it, and
+    /// ⌘K writing into it fills this box too.
+    private var search: String { store.searchTerm }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -47,10 +49,10 @@ struct Sidebar: View {
 
             HStack(spacing: 6) {
                 Image(systemName: "magnifyingglass").font(.system(size: 11)).foregroundStyle(.tertiary)
-                TextField("Search every model's history", text: $search)
+                TextField("Search every model's history", text: $store.searchTerm)
                     .textFieldStyle(.plain).font(.system(size: 12))
                 if !search.isEmpty {
-                    Button { search = "" } label: { Image(systemName: "xmark.circle.fill").font(.system(size: 11)).foregroundStyle(.tertiary) }
+                    Button { store.searchTerm = ""; store.jump = nil } label: { Image(systemName: "xmark.circle.fill").font(.system(size: 11)).foregroundStyle(.tertiary) }
                         .buttonStyle(.plain)
                 }
             }
@@ -60,7 +62,7 @@ struct Sidebar: View {
             .padding(.top, 10)
             .padding(.bottom, 4)
 
-            List(selection: $route) {
+            List(selection: selection) {
                 Section("Library") {
                     ForEach(LibraryItem.Kind.allCases, id: \.self) { kind in
                         // .badge before .tag — the other order makes the row unselectable on macOS 26.
@@ -93,7 +95,7 @@ struct Sidebar: View {
 
                 Section(chatSectionTitle) {
                     ForEach(visibleConversations) { conversation in
-                        ConversationRow(conversation: conversation, running: conductor.isRunning(conversation.id))
+                        ConversationRow(conversation: conversation, running: conductor.isRunning(conversation.id), term: trimmedSearch)
                             .tag(Route.conversation(conversation.id))
                             .contextMenu {
                                 Button(conversation.pinned ? "Unpin" : "Pin") { togglePin(conversation.id) }
@@ -138,8 +140,35 @@ struct Sidebar: View {
         }
     }
 
+    private var trimmedSearch: String {
+        search.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     private var chatSectionTitle: String {
-        search.isEmpty ? "Chats" : "Matches"
+        guard !trimmedSearch.isEmpty else { return "Chats" }
+        let count = visibleConversations.count
+        return count == 1 ? "1 match" : "\(count) matches"
+    }
+
+    /// Selecting a row is also how a search result is opened, so the click has
+    /// to carry the phrase with it: the thread then scrolls to the message
+    /// that matched rather than to the top of the history.
+    private var selection: Binding<Route?> {
+        Binding(
+            get: { route },
+            set: { newValue in
+                route = newValue
+                guard case .conversation(let id) = newValue else { return }
+                store.jump = jump(to: id)
+            })
+    }
+
+    private func jump(to id: UUID) -> SearchJump? {
+        let term = trimmedSearch
+        guard !term.isEmpty,
+              let conversation = store.conversations.first(where: { $0.id == id }),
+              let hit = conversation.firstHit(for: term) else { return nil }
+        return SearchJump(conversationID: id, messageID: hit.messageID, term: term)
     }
 
     /// Every chat, always — a project page lists its own under Recents, and
@@ -148,11 +177,8 @@ struct Sidebar: View {
     /// so finding "what did Gemini say about the pricing page" has to work.
     private var visibleConversations: [Conversation] {
         let scoped = store.conversations
-        guard !search.isEmpty else { return scoped }
-        return scoped.filter { conversation in
-            conversation.title.localizedCaseInsensitiveContains(search)
-                || conversation.messages.contains { $0.text.localizedCaseInsensitiveContains(search) }
-        }
+        guard !trimmedSearch.isEmpty else { return scoped }
+        return scoped.filter { $0.matches(trimmedSearch) }
     }
 
     private func newChat(in projectID: UUID) {
@@ -205,6 +231,13 @@ struct ConversationRow: View {
     @EnvironmentObject var conductor: Conductor
     let conversation: Conversation
     let running: Bool
+    /// What the reader typed in the search box, if anything — the row then
+    /// shows the line that matched instead of the last thing said.
+    var term: String = ""
+
+    private var hit: SearchHit? {
+        term.isEmpty ? nil : conversation.firstHit(for: term)
+    }
 
     var body: some View {
         HStack(spacing: 8) {
@@ -226,12 +259,30 @@ struct ConversationRow: View {
                 Text(conversation.title)
                     .font(.system(size: 12.5))
                     .lineLimit(1)
-                Text(conversation.preview)
-                    .font(.system(size: 10.5))
-                    .foregroundStyle(.tertiary)
-                    .lineLimit(1)
+                if let hit {
+                    Text(hit.snippet)
+                        .font(.system(size: 10.5))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                } else {
+                    Text(conversation.preview)
+                        .font(.system(size: 10.5))
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                }
             }
             Spacer(minLength: 4)
+            if hit != nil {
+                let count = conversation.matchCount(for: term)
+                if count > 1 {
+                    Text("\(count)")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 5).padding(.vertical, 1)
+                        .background(Color.secondary.opacity(0.14), in: Capsule())
+                        .help("\(count) messages in this chat mention “\(term)”")
+                }
+            }
             if conversation.pinned {
                 Image(systemName: "pin.fill").font(.system(size: 8)).foregroundStyle(.tertiary)
             }

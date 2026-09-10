@@ -62,6 +62,7 @@ If something shows a red cross, hover it — Choir tells you the one thing to do
 - **Room** — several models answer the same message. *Parallel* (each blind to the others), *Relay* (each reads the ones before it) or *Debate* (a relay round, then a synthesis). Mark the answer you prefer with ★ and from then on every voice builds on it.
 - **Projects** — a folder with instructions and files; every chat inside inherits them, whatever model answers.
 - **Library** — *Prompts* (voice and rules), *Skills* (a job and when it applies) and *Knowhow* (standing facts). Written once, read by every model. Skills are also real `SKILL.md` folders that Claude Code and Codex read natively — share them from the Library.
+- **Search** — the box above the sidebar searches every message of every chat, whichever model wrote it. Matches are painted in the thread as you type, opening a result lands on the message that matched, and the header steps through the rest (*1 of 4*).
 - **MCP bridge** — Claude Code and Codex can read Choir's library and history back (Settings › MCP bridge shows the one-line setup).
 - **Meters** — if AI Profiles is installed, Choir shows how much of each subscription is left and can switch to the account that still has room.
 
